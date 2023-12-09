@@ -1,15 +1,20 @@
 const express = require("express");
 const app = express();
 const cors = require("cors");
-const pool = require("./db");
+
+const { config } = require("dotenv");
+config();
+
+const { Pool } = require("pg");
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL + "?sslmode=require",
+});
 
 const uploadMiddleware = require("./middlewares/uploadMiddleware");
 const uploadImageMiddleware = require("./middlewares/uploadImageMiddleware");
 const fs = require("fs");
 const { get } = require("http");
-
-const { config } = require("dotenv");
-config();
 
 const http = require("http").Server(app);
 
