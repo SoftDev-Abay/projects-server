@@ -20,7 +20,7 @@ const http = require("http").Server(app);
 
 const socketIO = require("socket.io")(http, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: "https://projects-webapp.vercel.app",
   },
 });
 
