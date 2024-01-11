@@ -321,8 +321,8 @@ app.post("/tasks", uploadMiddleware, async (req, res) => {
 
     for (let index = 0; index < members.length; index++) {
       const newTaskMember = await pool.query(
-        "insert into tasks_members(task_id, user_id) values ($1, (select id from users where username = $2))",
-        [task_id, members[index]]
+        "insert into tasks_members(task_id, user_id, role) values ($1, (select id from users where username = $2), $3)",
+        [task_id, members[index], index == 0 ? "admin" : "member"]
       );
     }
 
@@ -426,7 +426,7 @@ app.get("/task/:task_id", async (req, res) => {
     ]);
 
     const taskMembers = await pool.query(
-      "select u.* from tasks_members inner join users u on u.id = tasks_members.user_id where task_id = $1",
+      "select u.*, tasks_members.role as task_role  from tasks_members inner join users u on u.id = tasks_members.user_id where task_id = $1",
       [task_id]
     );
 
