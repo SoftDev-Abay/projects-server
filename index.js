@@ -21,6 +21,7 @@ const http = require("http").Server(app);
 const socketIO = require("socket.io")(http, {
   cors: {
     origin: "https://projects-webapp.vercel.app",
+    // origin: "http://localhost:3000",
   },
 });
 
@@ -154,6 +155,7 @@ app.get("/user_chatrooms/:user_id", async (req, res) => {
 app.post("/users/auth", async (req, res) => {
   try {
     const { user_email, user_password } = req.body;
+    console.log(req.body);
     const checkUser = await pool.query(
       "SELECT * FROM users WHERE email = $1 AND password = $2",
       [user_email, user_password]
@@ -297,7 +299,6 @@ app.get("/user_projects/:user_id", async (req, res) => {
 // create a task
 
 app.post("/tasks", uploadMiddleware, async (req, res) => {
-  console.log(5 / 0);
   try {
     const files = req.files;
     const {
@@ -350,14 +351,122 @@ app.post("/tasks", uploadMiddleware, async (req, res) => {
   }
 });
 
-// get tasks where user is a member
+// update a task only subtasks - user
+
+app.put("/task/subtasks/:task_id", async (req, res) => {
+  try {
+    const { task_id } = req.params;
+    const { subtasks } = req.body;
+
+    const deletedSubtasks = await pool.query(
+      "delete from subtasks where task_id = $1",
+      [task_id]
+    );
+
+    for (let index = 0; index < subtasks.length; index++) {
+      const newSubtask = await pool.query(
+        "insert into subtasks(text, completed, task_id) values ($1,$2,$3)",
+        [subtasks[index].text, subtasks[index].completed, task_id]
+      );
+    }
+
+    res.status(200).json({ message: "Task update successful " });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// update a task - admin
+
+app.put("/task/:task_id", uploadMiddleware, async (req, res) => {
+  try {
+    const files = req.files;
+    const { task_id } = req.params;
+    const {
+      name,
+      description,
+      date_created,
+      projectName,
+      subtasks,
+      members,
+      deletedFiles,
+    } = req.body;
+
+    const updatedTask = await pool.query(
+      "update tasks set name = $1, description = $2, project_id = (select p.id from projects p where p.name = $3), date_created = $4 where id = $5 RETURNING id",
+      [name, description, projectName, date_created, task_id]
+    );
+
+    const parsedSubtasks = JSON.parse(subtasks);
+
+    const deletedSubtasks = await pool.query(
+      "delete from subtasks where task_id = $1",
+      [task_id]
+    );
+
+    for (let index = 0; index < parsedSubtasks.length; index++) {
+      const newSubtask = await pool.query(
+        "insert into subtasks(text, completed, task_id) values ($1,$2,$3)",
+        [parsedSubtasks[index].text, parsedSubtasks[index].completed, task_id]
+      );
+    }
+
+    const deletedMembers = await pool.query(
+      "delete from tasks_members where task_id = $1",
+      [task_id]
+    );
+
+    for (let index = 0; index < members.length; index++) {
+      const newTaskMember = await pool.query(
+        "insert into tasks_members(task_id, user_id, role) values ($1, (select id from users where username = $2), $3)",
+        [task_id, members[index], index == 0 ? "admin" : "member"]
+      );
+    }
+    const parsedDeletedFiles = JSON.parse(deletedFiles);
+
+    for (let index = 0; index < parsedDeletedFiles.length; index++) {
+      const file = await pool.query(
+        "select * from attachments where file_source_name = $1",
+        [parsedDeletedFiles[index].file_source_name]
+      );
+      const fileSource = `${__dirname}/attachments/${parsedDeletedFiles[index].file_source_name}`;
+
+      console.log(fileSource);
+
+      if (fs.existsSync(fileSource)) {
+        fs.unlinkSync(fileSource);
+        console.log(fileSource);
+      }
+
+      const deletedFile = await pool.query(
+        "delete from attachments where file_source_name = $1",
+        [parsedDeletedFiles[index].file_source_name]
+      );
+    }
+
+    for (let index = 0; index < files.length; index++) {
+      const newFile = await pool.query(
+        "insert into attachments(file_name, file_source_name, task_id) values ($1,$2,$3)",
+        [files[index].originalname, files[index].filename, task_id]
+      );
+    }
+
+    res.status(200).json({ message: "Task update successful " });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// get tasks where user is a member/admin
 
 app.get("/user_tasks/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
 
     const userTasks = await pool.query(
-      "select t.* from tasks t inner join tasks_members tm on t.id = tm.task_id where tm.user_id = $1;",
+      "select t.*, tm.role as task_user_role from tasks t inner join tasks_members tm on t.id = tm.task_id where tm.user_id = $1;",
       [user_id]
     );
 
@@ -460,7 +569,7 @@ app.get("/task/:task_id", async (req, res) => {
 
 // update task status
 
-app.put("/task/:task_id", async (req, res) => {
+app.put("/task/status/:task_id", async (req, res) => {
   try {
     const { task_id } = req.params;
     const { status } = req.body;
@@ -513,7 +622,9 @@ app.delete("/task/:task_id", async (req, res) => {
 
     for (let index = 0; index < taskAttachments.rows.length; index++) {
       const fileSource = `${__dirname}/attachments/${taskAttachments.rows[index].file_source_name}`;
-      fs.unlinkSync(fileSource);
+      if (fs.existsSync(fileSource)) {
+        fs.unlinkSync(fileSource);
+      }
     }
 
     const deletedTask = await pool.query("delete from tasks where id = $1", [
@@ -523,6 +634,7 @@ app.delete("/task/:task_id", async (req, res) => {
     res.json(deletedTask.rows[0]);
   } catch (error) {
     console.error(error.message);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
